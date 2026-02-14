@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Secure Encrypted Notebook</title>
+<style>
+body{
+  margin:0;
+  font-family:system-ui,Segoe UI;
+  background:#0b1220;
+  color:#e5e7eb;
+}
+header{
+  padding:14px 20px;
+  background:#020617;
+  border-bottom:1px solid #1f2933;
+  display:flex;
+  justify-content:space-between;
+}
+button{
+  background:#2563eb;
+  border:none;
+  color:white;
+  padding:8px 14px;
+  border-radius:6px;
+  cursor:pointer;
+  font-weight:600;
+}
+input,textarea{
+  background:#020617;
+  border:1px solid #1f2933;
+  color:#e5e7eb;
+  padding:10px;
+  border-radius:6px;
+  width:100%;
+}
+.container{display:flex;height:calc(100vh - 60px)}
+.sidebar{width:260px;padding:10px;border-right:1px solid #1f2933;}
+.note{padding:8px;border-radius:6px;border:1px solid #1f2933;margin-bottom:6px;cursor:pointer}
+.note.active{border-color:#2563eb}
+.editor{flex:1;padding:10px;display:flex;flex-direction:column}
+.toolbar{display:flex;gap:6px;margin-bottom:6px}
+canvas{border:1px solid #1f2933;border-radius:6px;background:#020617;width:100%;height:400px}
+.auth{max-width:400px;margin:80px auto;padding:20px;border-radius:10px;border:1px solid #1f2933;background:#020617}
+.hidden{display:none}
+</style>
+</head>
+
+<body>
+
+<div id="auth" class="auth">
+<h2>Secure Login / Register</h2>
+<input id="username" placeholder="Username">
+<input id="password" type="password" placeholder="Password" style="margin-top:8px">
+<button onclick="login()" style="margin-top:10px">Login</button>
+<button onclick="register()" style="margin-top:6px">Register</button>
+</div>
+
+<div id="app" class="hidden">
+<header>
+<div>🔐 Encrypted Notebook</div>
+<button onclick="logout()">Logout</button>
+</header>
+
+<div class="container">
+<div class="sidebar">
+<button onclick="newNote()" style="width:100%">+ New Note</button>
+<div id="notes"></div>
+</div>
+
+<div class="editor">
+<input id="title" placeholder="Title">
+<textarea id="content" rows="6" placeholder="Write securely..." style="margin-top:6px"></textarea>
+
+<div class="toolbar">
+<button onclick="saveNote()">Save</button>
+<button onclick="downloadPDF()">Download PDF</button>
+<button onclick="clearCanvas()">Clear Draw</button>
+</div>
+
+<canvas id="canvas" width="1400" height="700"></canvas>
+</div>
+</div>
+</div>
+
+<script>
+let user=null, key=null, activeNote=null, drawing=false, ctx=null;
+
+/* ----------- CRYPTO ENGINE ----------- */
+
+async function deriveKey(password, salt){
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey("raw", enc.encode(password), {name:"PBKDF2"}, false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({
+    name:"PBKDF2",
+    salt:salt,
+    iterations:100000,
+    hash:"SHA-256"
+  }, baseKey, {name:"AES-GCM",length:256}, false, ["encrypt","decrypt"]);
+}
+
+async function encrypt(data){
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = new TextEncoder();
+  const encrypted = await crypto.subtle.encrypt({name:"AES-GCM",iv}, key, enc.encode(data));
+  return { iv:Array.from(iv), data:Array.from(new Uint8Array(encrypted)) };
+}
+
+async function decrypt(blob){
+  const iv = new Uint8Array(blob.iv);
+  const data = new Uint8Array(blob.data);
+  const decrypted = await crypto.subtle.decrypt({name:"AES-GCM",iv}, key, data);
+  return new TextDecoder().decode(decrypted);
+}
+
+/* ----------- AUTH ----------- */
+
+async function register(){
+  const u=username.value.trim(), p=password.value;
+  if(!u||!p) return alert("Fill fields");
+
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  const k=await deriveKey(p,salt);
+
+  let users=JSON.parse(localStorage.getItem("users")||"{}");
+  if(users[u]) return alert("User exists");
+
+  users[u]={ salt:Array.from(salt), notes:[] };
+  localStorage.setItem("users",JSON.stringify(users));
+  alert("Registered — Login now");
+}
+
+async function login(){
+  const u=username.value.trim(), p=password.value;
+  let users=JSON.parse(localStorage.getItem("users")||"{}");
+  if(!users[u]) return alert("Invalid");
+
+  const salt=new Uint8Array(users[u].salt);
+  key=await deriveKey(p,salt);
+
+  user=u;
+  loadApp();
+}
+
+function logout(){location.reload();}
+
+/* ----------- APP ----------- */
+
+function loadApp(){
+  auth.classList.add("hidden");
+  app.classList.remove("hidden");
+  ctx=canvas.getContext("2d");
+  ctx.lineCap="round";
+  ctx.lineJoin="round";
+  loadNotes();
+}
+
+function loadNotes(){
+  notes.innerHTML="";
+  const users=JSON.parse(localStorage.getItem("users"));
+  users[user].notes.forEach((n,i)=>{
+    const div=document.createElement("div");
+    div.className="note"+(activeNote===i?" active":"");
+    div.innerText="Encrypted Note";
+    div.onclick=()=>openNote(i);
+    notes.appendChild(div);
+  });
+}
+
+function newNote(){
+  activeNote=null;
+  title.value="";
+  content.value="";
+  clearCanvas();
+}
+
+async function openNote(i){
+  const users=JSON.parse(localStorage.getItem("users"));
+  const n=users[user].notes[i];
+  activeNote=i;
+
+  title.value=await decrypt(n.title);
+  content.value=await decrypt(n.content);
+
+  clearCanvas();
+  if(n.drawing){
+    const img=new Image();
+    img.onload=()=>ctx.drawImage(img,0,0);
+    img.src=await decrypt(n.drawing);
+  }
+
+  loadNotes();
+}
+
+async function saveNote(){
+  const users=JSON.parse(localStorage.getItem("users"));
+
+  const note={
+    title:await encrypt(title.value),
+    content:await encrypt(content.value),
+    drawing:await encrypt(canvas.toDataURL())
+  };
+
+  if(activeNote===null) users[user].notes.push(note);
+  else users[user].notes[activeNote]=note;
+
+  localStorage.setItem("users",JSON.stringify(users));
+  loadNotes();
+  alert("Encrypted & saved");
+}
+
+/* ----------- PDF EXPORT ----------- */
+
+function downloadPDF(){
+  const iframe=document.createElement("iframe");
+  iframe.style.display="none";
+  document.body.appendChild(iframe);
+  const doc=iframe.contentWindow.document;
+
+  doc.open();
+  doc.write(`
+  <html><body style="font-family:Arial;padding:40px">
+  <h1>${title.value}</h1>
+  <pre>${content.value}</pre>
+  <img src="${canvas.toDataURL()}" style="max-width:100%">
+  </body></html>
+  `);
+  doc.close();
+
+  iframe.contentWindow.focus();
+  iframe.contentWindow.print();
+
+  setTimeout(()=>document.body.removeChild(iframe),1000);
+}
+
+/* ----------- DRAW ENGINE ----------- */
+
+function pos(e){
+  const r=canvas.getBoundingClientRect();
+  return {
+    x:(e.clientX-r.left)*(canvas.width/r.width),
+    y:(e.clientY-r.top)*(canvas.height/r.height)
+  };
+}
+
+canvas.onmousedown=e=>{drawing=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);}
+canvas.onmouseup=()=>drawing=false;
+canvas.onmouseleave=()=>drawing=false;
+canvas.onmousemove=e=>{
+  if(!drawing)return;
+  const p=pos(e);
+  ctx.lineTo(p.x,p.y);
+  ctx.strokeStyle="#22c55e";
+  ctx.lineWidth=2.5;
+  ctx.stroke();
+}
+
+function clearCanvas(){ctx.clearRect(0,0,canvas.width,canvas.height);}
+
+</script>
+</body>
+</html>

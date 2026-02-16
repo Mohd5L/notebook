@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Secure Encrypted Notebook</title>
+
 <style>
 body{
   margin:0;
@@ -36,13 +37,33 @@ input,textarea{
   width:100%;
 }
 .container{display:flex;height:calc(100vh - 60px)}
-.sidebar{width:260px;padding:10px;border-right:1px solid #1f2933;}
+.sidebar{width:260px;padding:10px;border-right:1px solid #1f2933;overflow-y:auto}
 .note{padding:8px;border-radius:6px;border:1px solid #1f2933;margin-bottom:6px;cursor:pointer}
 .note.active{border-color:#2563eb}
 .editor{flex:1;padding:10px;display:flex;flex-direction:column}
-.toolbar{display:flex;gap:6px;margin-bottom:6px}
-canvas{border:1px solid #1f2933;border-radius:6px;background:#020617;width:100%;height:400px}
-.auth{max-width:400px;margin:80px auto;padding:20px;border-radius:10px;border:1px solid #1f2933;background:#020617}
+.toolbar{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+
+.draw-wrap{
+  flex:1;
+  overflow-y:auto;
+  border:1px solid #1f2933;
+  border-radius:6px;
+}
+
+canvas{
+  background:#020617;
+  width:100%;
+}
+
+.auth{
+  max-width:400px;
+  margin:80px auto;
+  padding:20px;
+  border-radius:10px;
+  border:1px solid #1f2933;
+  background:#020617;
+}
+
 .hidden{display:none}
 </style>
 </head>
@@ -59,11 +80,12 @@ canvas{border:1px solid #1f2933;border-radius:6px;background:#020617;width:100%;
 
 <div id="app" class="hidden">
 <header>
-<div>🔐 Encrypted Notebook</div>
+<div>🔐 Secure Encrypted Notebook</div>
 <button onclick="logout()">Logout</button>
 </header>
 
 <div class="container">
+
 <div class="sidebar">
 <button onclick="newNote()" style="width:100%">+ New Note</button>
 <div id="notes"></div>
@@ -79,73 +101,83 @@ canvas{border:1px solid #1f2933;border-radius:6px;background:#020617;width:100%;
 <button onclick="clearCanvas()">Clear Draw</button>
 </div>
 
-<canvas id="canvas" width="1400" height="700"></canvas>
+<div class="draw-wrap">
+<canvas id="canvas" width="1400" height="900"></canvas>
+</div>
+
 </div>
 </div>
 </div>
 
 <script>
-let user=null, key=null, activeNote=null, drawing=false, ctx=null;
+let user=null, key=null, activeNote=null;
+let drawing=false, ctx=null;
+let lastX=0, lastY=0;
 
-/* ----------- CRYPTO ENGINE ----------- */
+/* ---------- CRYPTO ---------- */
 
 async function deriveKey(password, salt){
   const enc = new TextEncoder();
-  const baseKey = await crypto.subtle.importKey("raw", enc.encode(password), {name:"PBKDF2"}, false, ["deriveKey"]);
+  const baseKey = await crypto.subtle.importKey(
+    "raw", enc.encode(password), {name:"PBKDF2"}, false, ["deriveKey"]
+  );
+
   return crypto.subtle.deriveKey({
     name:"PBKDF2",
-    salt:salt,
+    salt,
     iterations:100000,
     hash:"SHA-256"
   }, baseKey, {name:"AES-GCM",length:256}, false, ["encrypt","decrypt"]);
 }
 
-async function encrypt(data){
+async function encrypt(text){
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const enc = new TextEncoder();
-  const encrypted = await crypto.subtle.encrypt({name:"AES-GCM",iv}, key, enc.encode(data));
-  return { iv:Array.from(iv), data:Array.from(new Uint8Array(encrypted)) };
+  const encoded = new TextEncoder().encode(text);
+  const cipher = await crypto.subtle.encrypt({name:"AES-GCM",iv}, key, encoded);
+
+  return {
+    iv: Array.from(iv),
+    data: Array.from(new Uint8Array(cipher))
+  };
 }
 
 async function decrypt(blob){
   const iv = new Uint8Array(blob.iv);
   const data = new Uint8Array(blob.data);
-  const decrypted = await crypto.subtle.decrypt({name:"AES-GCM",iv}, key, data);
-  return new TextDecoder().decode(decrypted);
+  const plain = await crypto.subtle.decrypt({name:"AES-GCM",iv}, key, data);
+  return new TextDecoder().decode(plain);
 }
 
-/* ----------- AUTH ----------- */
+/* ---------- AUTH ---------- */
 
 async function register(){
   const u=username.value.trim(), p=password.value;
-  if(!u||!p) return alert("Fill fields");
-
-  const salt=crypto.getRandomValues(new Uint8Array(16));
-  const k=await deriveKey(p,salt);
+  if(!u||!p) return alert("Fill all fields");
 
   let users=JSON.parse(localStorage.getItem("users")||"{}");
   if(users[u]) return alert("User exists");
 
+  const salt=crypto.getRandomValues(new Uint8Array(16));
   users[u]={ salt:Array.from(salt), notes:[] };
   localStorage.setItem("users",JSON.stringify(users));
-  alert("Registered — Login now");
+
+  alert("Registered — now login");
 }
 
 async function login(){
   const u=username.value.trim(), p=password.value;
   let users=JSON.parse(localStorage.getItem("users")||"{}");
-  if(!users[u]) return alert("Invalid");
+  if(!users[u]) return alert("Invalid login");
 
   const salt=new Uint8Array(users[u].salt);
   key=await deriveKey(p,salt);
-
   user=u;
   loadApp();
 }
 
-function logout(){location.reload();}
+function logout(){ location.reload(); }
 
-/* ----------- APP ----------- */
+/* ---------- APP ---------- */
 
 function loadApp(){
   auth.classList.add("hidden");
@@ -184,11 +216,9 @@ async function openNote(i){
   content.value=await decrypt(n.content);
 
   clearCanvas();
-  if(n.drawing){
-    const img=new Image();
-    img.onload=()=>ctx.drawImage(img,0,0);
-    img.src=await decrypt(n.drawing);
-  }
+  const img=new Image();
+  img.onload=()=>ctx.drawImage(img,0,0);
+  img.src=await decrypt(n.drawing);
 
   loadNotes();
 }
@@ -207,10 +237,10 @@ async function saveNote(){
 
   localStorage.setItem("users",JSON.stringify(users));
   loadNotes();
-  alert("Encrypted & saved");
+  alert("Encrypted & Saved");
 }
 
-/* ----------- PDF EXPORT ----------- */
+/* ---------- PDF EXPORT ---------- */
 
 function downloadPDF(){
   const iframe=document.createElement("iframe");
@@ -234,30 +264,77 @@ function downloadPDF(){
   setTimeout(()=>document.body.removeChild(iframe),1000);
 }
 
-/* ----------- DRAW ENGINE ----------- */
+/* ---------- DRAW ENGINE (MOBILE + DESKTOP + INFINITE) ---------- */
 
-function pos(e){
-  const r=canvas.getBoundingClientRect();
+function getPos(evt){
+  const rect=canvas.getBoundingClientRect();
+  let x,y;
+
+  if(evt.touches){
+    x=evt.touches[0].clientX;
+    y=evt.touches[0].clientY;
+  }else{
+    x=evt.clientX;
+    y=evt.clientY;
+  }
+
   return {
-    x:(e.clientX-r.left)*(canvas.width/r.width),
-    y:(e.clientY-r.top)*(canvas.height/r.height)
+    x:(x-rect.left)*(canvas.width/rect.width),
+    y:(y-rect.top)*(canvas.height/rect.height)
   };
 }
 
-canvas.onmousedown=e=>{drawing=true;const p=pos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);}
-canvas.onmouseup=()=>drawing=false;
-canvas.onmouseleave=()=>drawing=false;
-canvas.onmousemove=e=>{
-  if(!drawing)return;
-  const p=pos(e);
+function expandCanvas(y){
+  if(y>canvas.height-150){
+    const old=ctx.getImageData(0,0,canvas.width,canvas.height);
+    canvas.height+=700;
+    ctx.putImageData(old,0,0);
+  }
+}
+
+function startDraw(e){
+  drawing=true;
+  const p=getPos(e);
+  lastX=p.x;
+  lastY=p.y;
+}
+
+function draw(e){
+  if(!drawing) return;
+  e.preventDefault();
+  const p=getPos(e);
+
+  expandCanvas(p.y);
+
+  ctx.beginPath();
+  ctx.moveTo(lastX,lastY);
   ctx.lineTo(p.x,p.y);
   ctx.strokeStyle="#22c55e";
   ctx.lineWidth=2.5;
   ctx.stroke();
+
+  lastX=p.x;
+  lastY=p.y;
 }
 
-function clearCanvas(){ctx.clearRect(0,0,canvas.width,canvas.height);}
+function stopDraw(){ drawing=false; }
+
+canvas.addEventListener("mousedown",startDraw);
+canvas.addEventListener("mousemove",draw);
+canvas.addEventListener("mouseup",stopDraw);
+canvas.addEventListener("mouseleave",stopDraw);
+
+canvas.addEventListener("touchstart",startDraw,{passive:false});
+canvas.addEventListener("touchmove",draw,{passive:false});
+canvas.addEventListener("touchend",stopDraw);
+canvas.addEventListener("touchcancel",stopDraw);
+
+function clearCanvas(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  canvas.height=900;
+}
 
 </script>
+
 </body>
 </html>

@@ -1,6 +1,3 @@
-Here’s a **clean, professional, portfolio-grade README** you can drop directly into your repository. It explains the project properly, highlights security, and makes you look *very serious* as a cybersecurity student 😈
-
----
 
 # 🔐 Secure Encrypted Notebook
 

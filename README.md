@@ -79,12 +79,6 @@ This ensures:
 
 ---
 
-## 📸 Screenshots
-
-*(Optional — add UI screenshots here)*
-
----
-
 ## ⚙ How To Run Locally
 
 Simply open the file:

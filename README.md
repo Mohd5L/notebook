@@ -102,11 +102,6 @@ npx serve .
 3. Set source branch to `main`
 4. Save
 
-Your secure notebook will be live at:
-
-```
-https://<username>.github.io/<repo-name>/
-```
 
 ---
 
@@ -115,19 +110,6 @@ https://<username>.github.io/<repo-name>/
 This project is intended for **educational and demonstration purposes**.
 
 While strong cryptography is used, this application does **not replace professional-grade secure note platforms** and should not be used for storing highly sensitive real-world secrets.
-
----
-
-## 🎯 Learning Outcomes
-
-This project demonstrates:
-
-* Client-side cryptography implementation
-* Secure key management
-* Zero-knowledge data models
-* Canvas rendering & infinite scrolling systems
-* PDF generation
-* Secure UX design
 
 ---
 
